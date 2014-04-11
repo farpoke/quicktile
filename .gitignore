@@ -5,3 +5,4 @@ html
 _site
 QuickTile.egg-info
 *.py[co]
+.idea
