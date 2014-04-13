@@ -28,36 +28,43 @@ Thanks to Thomas Vander Stichele for some of the documentation cleanups.
 """
 
 __appname__ = "QuickTile"
-__author__  = "Stephan Sokolow (deitarion/SSokolow)"
+__author__ = "Stephan Sokolow (deitarion/SSokolow)"
 __version__ = "0.2.2"
 __license__ = "GNU GPL 2.0 or later"
 
-import errno, logging, os, sys, time
+import errno
+import logging
+import os
+import sys
+import time
 from ConfigParser import RawConfigParser
 from heapq import heappop, heappush
 from itertools import chain, combinations
 from functools import wraps
 from UserDict import DictMixin
 
+
 # TODO: Decide on a way to test this since Nose can't.
 #: Used to filter spurious libwnck error messages from stderr since PyGTK
 #: doesn't expose g_log_set_handler() to allow proper filtering.
 if __name__ == '__main__':  # pragma: nocover
     import subprocess
-    glib_log_filter = subprocess.Popen(
-            ['grep', '-v', 'Unhandled action type _OB_WM'],
-            stdin=subprocess.PIPE)
+    glib_log_filter = subprocess.Popen(['grep', '-v', 'Unhandled action type _OB_WM'], stdin=subprocess.PIPE)
 
     # Redirect stderr through grep
     os.dup2(glib_log_filter.stdin.fileno(), sys.stderr.fileno())
 
+
 import pygtk
 pygtk.require('2.0')
 
-import gtk, gobject, wnck
+import gtk
+import gobject
+import wnck
 
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 wnck.set_client_type(wnck.CLIENT_TYPE_PAGER)
+
 
 try:
     from Xlib import X
@@ -66,6 +73,7 @@ try:
     XLIB_PRESENT = True  #: Indicates presence of python-xlib (runtime check)
 except ImportError:
     XLIB_PRESENT = False  #: Indicates presence of python-xlib (runtime check)
+
 
 DBUS_PRESENT = False  #: Indicates availability of D-Bus (runtime check)
 try:
@@ -84,10 +92,13 @@ else:
     else:
         DBUS_PRESENT = True  #: Indicates availability of D-Bus (runtime check)
 
+
 #: Location for config files (determined at runtime).
-XDG_CONFIG_DIR = os.environ.get('XDG_CONFIG_HOME',
-                                os.path.expanduser('~/.config'))
+XDG_CONFIG_DIR = os.environ.get('XDG_CONFIG_HOME', os.path.expanduser('~/.config'))
+
+
 #{ Settings
+
 
 class GravityLayout(object):
     """Helper for generating L{cycle_dimensions} presets."""
@@ -151,32 +162,27 @@ DEFAULTS = {
         'UseWorkarea': True,
     },
     'keys': {
-        "KP_0"     : "maximize",
-        "KP_1"     : "bottom-left",
-        "KP_2"     : "bottom",
-        "KP_3"     : "bottom-right",
-        "KP_4"     : "left",
-        "KP_5"     : "middle",
-        "KP_6"     : "right",
-        "KP_7"     : "top-left",
-        "KP_8"     : "top",
-        "KP_9"     : "top-right",
-        "KP_Enter" : "monitor-switch",
-        "V"        : "vertical-maximize",
-        "H"        : "horizontal-maximize",
-        "C"        : "move-to-center",
+        "KP_0":     "maximize",
+        "KP_1":     "bottom-left",
+        "KP_2":     "bottom",
+        "KP_3":     "bottom-right",
+        "KP_4":     "left",
+        "KP_5":     "middle",
+        "KP_6":     "right",
+        "KP_7":     "top-left",
+        "KP_8":     "top",
+        "KP_9":     "top-right",
+        "KP_Enter": "monitor-switch",
+        "V":        "vertical-maximize",
+        "H":        "horizontal-maximize",
+        "C":        "move-to-center",
     }
 }  #: Default content for the config file
 
-KEYLOOKUP = {
-    ',': 'comma',
-    '.': 'period',
-    '+': 'plus',
-    '-': 'minus',
-}  #: Used for resolving certain keysyms
 
 #}
 #{ Helpers
+
 
 def powerset(iterable):
     """C{powerset([1,2,3])} --> C{() (1,) (2,) (3,) (1,2) (1,3) (2,3) (1,2,3)}
@@ -185,6 +191,7 @@ def powerset(iterable):
     """
     s = list(iterable)
     return chain.from_iterable(combinations(s, r) for r in range(len(s) + 1))
+
 
 def fmt_table(rows, headers, group_by=None):
     """Format a collection as a textual table.
@@ -248,6 +255,7 @@ def fmt_table(rows, headers, group_by=None):
 
     return ''.join(output)
 
+
 class EnumSafeDict(DictMixin):
     """A dict-like object which avoids comparing objects of different types
     to avoid triggering spurious Glib "comparing different enum types"
@@ -300,7 +308,9 @@ class EnumSafeDict(DictMixin):
     def keys(self):
         return list(self)
 
+
 #}
+
 
 class CommandRegistry(object):
     """Handles lookup and boilerplate for window management commands.
@@ -374,8 +384,8 @@ class CommandRegistry(object):
                 logging.warn("Overwriting command: %s", name)
             self.commands[name] = wrapper
 
-            helpStr = func.__doc__.strip().split('\n')[0].split('. ')[0]
-            self.help[name] = helpStr.strip('.')
+            help_str = func.__doc__.strip().split('\n')[0].split('. ')[0]
+            self.help[name] = help_str.strip('.')
 
             # Return the unwrapped function so decorators can be stacked
             # to define multiple commands using the same code with different
@@ -383,7 +393,7 @@ class CommandRegistry(object):
             return func
         return decorate
 
-    def addMany(self, command_map):
+    def add_many(self, command_map):
         """Convenience decorator to allow many commands to be defined from
            the same function with different arguments.
 
@@ -404,6 +414,7 @@ class CommandRegistry(object):
             cmd(wm, *args, **kwargs)
         else:
             logging.error("Unrecognized command: %s", command)
+
 
 class WindowManager(object):
     """A simple API-wrapper class for manipulating window positioning."""
@@ -525,31 +536,31 @@ class WindowManager(object):
         @rtype: C{gtk.gdk.Region}, C{gtk.gdk.Rectangle}
         """
         if isinstance(monitor, int):
-            usableRect = self.gdk_screen.get_monitor_geometry(monitor)
+            usable_rect = self.gdk_screen.get_monitor_geometry(monitor)
         elif not isinstance(monitor, gtk.gdk.Rectangle):
-            usableRect = gtk.gdk.Rectangle(monitor)
+            usable_rect = gtk.gdk.Rectangle(monitor)
         else:
-            usableRect = monitor
-        usableRegion = gtk.gdk.region_rectangle(usableRect)
+            usable_rect = monitor
+        usable_region = gtk.gdk.region_rectangle(usable_rect)
 
         if ignore_struts:
-            return usableRegion, usableRect
+            return usable_region, usable_rect
 
-        rootWin = self.gdk_screen.get_root_window()
+        root_wnd = self.gdk_screen.get_root_window()
 
         struts = []
         if self.gdk_screen.supports_net_wm_hint("_NET_WM_STRUT_PARTIAL"):
             # Gather all struts
-            struts.append(rootWin.property_get("_NET_WM_STRUT_PARTIAL"))
+            struts.append(root_wnd.property_get("_NET_WM_STRUT_PARTIAL"))
             if self.gdk_screen.supports_net_wm_hint("_NET_CLIENT_LIST"):
                 # Source: http://stackoverflow.com/a/11332614/435253
-                for wid in rootWin.property_get('_NET_CLIENT_LIST')[2]:
+                for wid in root_wnd.property_get('_NET_CLIENT_LIST')[2]:
                     w = gtk.gdk.window_foreign_new(wid)
                     struts.append(w.property_get("_NET_WM_STRUT_PARTIAL"))
             struts = [x[2] for x in struts if x]
 
             # Subtract the struts from the usable region
-            _Su = lambda *g: usableRegion.subtract(gtk.gdk.region_rectangle(g))
+            _Su = lambda *g: usable_region.subtract(gtk.gdk.region_rectangle(g))
             _w, _h = self.gdk_screen.get_width(), self.gdk_screen.get_height()
             for g in struts:
                 # http://standards.freedesktop.org/wm-spec/1.5/ar01s05.html
@@ -560,8 +571,8 @@ class WindowManager(object):
                 _Su(g[10], _h - g[3], g[11] - g[10] + 1, g[3])  # bottom
 
             # Generate a more restrictive version used as a fallback
-            usableRect = usableRegion.copy()
-            _Su = lambda *g: usableRect.subtract(gtk.gdk.region_rectangle(g))
+            usable_rect = usable_region.copy()
+            _Su = lambda *g: usable_rect.subtract(gtk.gdk.region_rectangle(g))
             for g in struts:
                 # http://standards.freedesktop.org/wm-spec/1.5/ar01s05.html
                 # XXX: Must not cache unless watching for notify events.
@@ -574,13 +585,13 @@ class WindowManager(object):
                 #       WM's code for constraining windows to the usable area
                 #       doesn't cause off-by-one bugs.
                 #TODO: Share this on http://stackoverflow.com/q/2598580/435253
-            usableRect = usableRect.get_clipbox()
+            usable_rect = usable_rect.get_clipbox()
         elif self.gdk_screen.supports_net_wm_hint("_NET_WORKAREA"):
-            desktopGeo = tuple(rootWin.property_get('_NET_WORKAREA')[2][0:4])
-            usableRegion.intersect(gtk.gdk.region_rectangle(desktopGeo))
-            usableRect = usableRegion.get_clipbox()
+            desktop_geometry = tuple(root_wnd.property_get('_NET_WORKAREA')[2][0:4])
+            usable_region.intersect(gtk.gdk.region_rectangle(desktop_geometry))
+            usable_rect = usable_region.get_clipbox()
 
-        return usableRegion, usableRect
+        return usable_region, usable_rect
 
     def get_workspace(self, window=None, direction=None):
         """Get a workspace relative to either a window or the active one.
@@ -620,9 +631,9 @@ class WindowManager(object):
 
     @classmethod
     def reposition(cls, win, geom=None, monitor=gtk.gdk.Rectangle(0, 0, 0, 0),
-            keep_maximize=False, gravity=wnck.WINDOW_GRAVITY_NORTHWEST,
-            geometry_mask= wnck.WINDOW_CHANGE_X | wnck.WINDOW_CHANGE_Y |
-                wnck.WINDOW_CHANGE_WIDTH | wnck.WINDOW_CHANGE_HEIGHT):
+                   keep_maximize=False, gravity=wnck.WINDOW_GRAVITY_NORTHWEST,
+                   geometry_mask=wnck.WINDOW_CHANGE_X | wnck.WINDOW_CHANGE_Y |
+                   wnck.WINDOW_CHANGE_WIDTH | wnck.WINDOW_CHANGE_HEIGHT):
         """
         Position and size a window, decorations inclusive, according to the
         provided target window and monitor geometry rectangles.
@@ -660,8 +671,7 @@ class WindowManager(object):
         old_geom = wm.get_geometry_rel(win, wm.get_monitor(win)[1])
         if geom:
             for attr in ('x', 'y', 'width', 'height'):
-                if not geometry_mask & getattr(wnck,
-                        'WINDOW_CHANGE_%s' % attr.upper()):
+                if not geometry_mask & getattr(wnck, 'WINDOW_CHANGE_%s' % attr.upper()):
                     setattr(geom, attr, getattr(old_geom, attr))
         else:
             geom = old_geom
@@ -678,8 +688,7 @@ class WindowManager(object):
         new_x += monitor.x
         new_y += monitor.y
 
-        logging.debug("repositioning to (%d, %d, %d, %d)",
-                new_x, new_y, geom.width, geom.height)
+        logging.debug("repositioning to (%d, %d, %d, %d)", new_x, new_y, geom.width, geom.height)
 
         #XXX: I'm not sure whether wnck, Openbox, or both are at fault,
         #     but window gravities seem to have no effect beyond double-
@@ -693,13 +702,13 @@ class WindowManager(object):
         #
         #     ...however, that still doesn't explain why the non-topleft
         #     gravities have no effect. I'm guessing something's just broken.
-        win.set_geometry(wnck.WINDOW_GRAVITY_STATIC, geometry_mask,
-                new_x, new_y, geom.width, geom.height)
+        win.set_geometry(wnck.WINDOW_GRAVITY_STATIC, geometry_mask, new_x, new_y, geom.width, geom.height)
 
         # Restore maximization if asked
         if maxed and keep_maximize:
             for mt in maxed:
                 getattr(win, 'maximize' + mt)()
+
 
 class KeyBinder(object):
     """A convenience class for wrapping C{XGrabKey}."""
@@ -722,8 +731,7 @@ class KeyBinder(object):
         self._keys = {}
 
         # Resolve these at runtime to avoid NameErrors
-        self.ignored_modifiers = [getattr(X, name) for name in
-                self.ignored_modifiers]
+        self.ignored_modifiers = [getattr(X, name) for name in self.ignored_modifiers]
 
         # We want to receive KeyPress events
         self.xroot.change_attributes(event_mask=X.KeyPressMask)
@@ -733,8 +741,7 @@ class KeyBinder(object):
 
         # Merge python-xlib into the Glib event loop
         # Source: http://www.pygtk.org/pygtk2tutorial/sec-MonitoringIO.html
-        gobject.io_add_watch(self.xroot.display,
-                             gobject.IO_IN, self.handle_xevent)
+        gobject.io_add_watch(self.xroot.display, gobject.IO_IN, self.handle_xevent)
 
     def bind(self, accel, callback):
         """Bind a global key combination to a callback.
@@ -778,8 +785,7 @@ class KeyBinder(object):
 
         if self.keybind_failed:
             self.keybind_failed = False
-            logging.warning("Failed to bind key. It may already be in use: %s",
-                accel)
+            logging.warning("Failed to bind key. It may already be in use: %s", accel)
 
     def handle_xerror(self, err, req=None):  # pylint: disable=W0613
         """Used to identify when attempts to bind keys fail.
@@ -815,8 +821,8 @@ class KeyBinder(object):
                             break
                     else:
                         logging.error("Received an event for a recognized key "
-                                  "with unrecognized modifiers: %s, %s",
-                                  xevent.detail, xevent.state)
+                                      "with unrecognized modifiers: %s, %s",
+                                      xevent.detail, xevent.state)
 
                 else:
                     logging.error("Received an event for an unrecognized "
@@ -844,6 +850,7 @@ class KeyBinder(object):
             imask = reduce(lambda x, y: x | y, ignored, 0)
             yield modmask | imask
 
+
 class QuickTileApp(object):
     """The basic Glib application itself."""
 
@@ -861,6 +868,9 @@ class QuickTileApp(object):
         self.commands = commands
         self._keys = keys or {}
         self._modmask = modmask or gtk.gdk.ModifierType(0)
+        self.keybinder = None
+        self.dbus_name = None
+        self.dbus_obj = None
 
     def run(self):
         """Initialize keybinding and D-Bus if available, then call
@@ -885,18 +895,15 @@ class QuickTileApp(object):
         if DBUS_PRESENT:
             class QuickTile(dbus.service.Object):
                 def __init__(self, commands):
-                    dbus.service.Object.__init__(self, sessBus,
-                                                 '/com/ssokolow/QuickTile')
+                    dbus.service.Object.__init__(self, sessBus, '/com/ssokolow/QuickTile')
                     self.commands = commands
 
-                @dbus.service.method(dbus_interface='com.ssokolow.QuickTile',
-                         in_signature='s', out_signature='b')
-                def doCommand(self, command):
+                @dbus.service.method(dbus_interface='com.ssokolow.QuickTile', in_signature='s', out_signature='b')
+                def do_command(self, command):
                     return self.commands.call(command, wm)
 
-            self.dbusName = dbus.service.BusName("com.ssokolow.QuickTile",
-                                                 sessBus)
-            self.dbusObj = QuickTile(self.commands)
+            self.dbus_name = dbus.service.BusName("com.ssokolow.QuickTile", sessBus)
+            self.dbus_obj = QuickTile(self.commands)
         else:
             logging.warn("Could not connect to the D-Bus Session Bus.")
 
@@ -906,7 +913,7 @@ class QuickTileApp(object):
         else:
             return False
 
-    def showBinds(self):
+    def show_bindings(self):
         """Print a formatted readout of defined keybindings and the modifier
         mask to stdout.
 
@@ -917,11 +924,15 @@ class QuickTileApp(object):
         print "Modifier: %s\n" % self._modmask
         print fmt_table(self._keys, ('Key', 'Action'))
 
+
 #: The instance of L{CommandRegistry} to be used in 99.9% of use cases.
 commands = CommandRegistry()
+
+
 #{ Tiling Commands
 
-@commands.addMany(POSITIONS)
+
+@commands.add_many(POSITIONS)
 def cycle_dimensions(wm, win, state, *dimensions):
     """Cycle the active window through a list of positions and shapes.
 
@@ -943,7 +954,7 @@ def cycle_dimensions(wm, win, state, *dimensions):
 
     # Get the bounding box for the usable region (overlaps panels which
     # don't fill 100% of their edge of the screen)
-    clipBox = usable_region.get_clipbox()
+    clip_box = usable_region.get_clipbox()
 
     # Resolve proportional (eg. 0.5) and preserved (None) coordinates
     dims = []
@@ -954,8 +965,8 @@ def cycle_dimensions(wm, win, state, *dimensions):
                 current_dim.append(tuple(win_geom)[pos])
             else:
                 # FIXME: This is a bit of an ugly way to get (w, h, w, h)
-                # from clipBox.
-                current_dim.append(int(val * tuple(clipBox)[2 + pos % 2]))
+                # from clip_box.
+                current_dim.append(int(val * tuple(clip_box)[2 + pos % 2]))
 
         dims.append(current_dim)
 
@@ -980,8 +991,8 @@ def cycle_dimensions(wm, win, state, *dimensions):
     else:
         pos = 0
     result = gtk.gdk.Rectangle(*dims[pos])
-    result.x += clipBox.x
-    result.y += clipBox.y
+    result.x += clip_box.x
+    result.y += clip_box.y
 
     # If we're overlapping a panel, fall back to a monitor-specific
     # analogue to _NET_WORKAREA to prevent overlapping any panels and
@@ -993,6 +1004,7 @@ def cycle_dimensions(wm, win, state, *dimensions):
     logging.debug("result %r", tuple(result))
     wm.reposition(win, result)
     return result
+
 
 @commands.add('monitor-switch')
 @commands.add('monitor-next', 1)
@@ -1011,8 +1023,9 @@ def cycle_monitors(wm, win, state, step=1):
 
     wm.reposition(win, None, new_mon_geom, keep_maximize=True)
 
+
 @commands.add('move-to-center')
-def cmd_moveCenter(wm, win, state):
+def cmd_move_to_center(wm, win, state):
     """Center the window in the monitor it currently occupies."""
     use_rect = state['usable_rect']
 
@@ -1023,7 +1036,8 @@ def cmd_moveCenter(wm, win, state):
     logging.debug("result %r", tuple(result))
 
     wm.reposition(win, result, use_rect, gravity=wnck.WINDOW_GRAVITY_CENTER,
-           geometry_mask= wnck.WINDOW_CHANGE_X | wnck.WINDOW_CHANGE_Y)
+                  geometry_mask=wnck.WINDOW_CHANGE_X | wnck.WINDOW_CHANGE_Y)
+
 
 @commands.add('bordered')
 def toggle_decorated(wm, win, state):  # pylint: disable=W0613
@@ -1031,18 +1045,18 @@ def toggle_decorated(wm, win, state):  # pylint: disable=W0613
     win = gtk.gdk.window_foreign_new(win.get_xid())
     win.set_decorations(not win.get_decorations())
 
+
 @commands.add('show-desktop')
 def toggle_desktop(wm, win, state):  # pylint: disable=W0613
     """Toggle "all windows minimized" to view the desktop"""
     target = not wm.screen.get_showing_desktop()
     wm.screen.toggle_showing_desktop(target)
 
+
 @commands.add('all-desktops', 'pin', 'is_pinned')
 @commands.add('fullscreen', 'set_fullscreen', 'is_fullscreen', True)
-@commands.add('vertical-maximize', 'maximize_vertically',
-                                   'is_maximized_vertically')
-@commands.add('horizontal-maximize', 'maximize_horizontally',
-                                     'is_maximized_horizontally')
+@commands.add('vertical-maximize', 'maximize_vertically', 'is_maximized_vertically')
+@commands.add('horizontal-maximize', 'maximize_horizontally', 'is_maximized_horizontally')
 @commands.add('maximize', 'maximize', 'is_maximized')
 @commands.add('minimize', 'minimize', 'is_minimized')
 @commands.add('always-above', 'make_above', 'is_above')
@@ -1073,11 +1087,13 @@ def toggle_state(wm, win, state, command, check, takes_bool=False):
     else:
         getattr(win, ('' if target else 'un') + command)()
 
+
 @commands.add('trigger-move', 'move')
 @commands.add('trigger-resize', 'size')
 def trigger_keyboard_action(wm, win, state, command):  # pylint: disable=W0613
     """Ask the Window Manager to begin a keyboard-driven operation."""
     getattr(win, 'keyboard_' + command)()
+
 
 @commands.add('workspace-go-next', 1)
 @commands.add('workspace-go-prev', -1)
@@ -1091,6 +1107,7 @@ def workspace_go(wm, win, state, motion):  # pylint: disable=W0613
     if not target:
         return  # It's either pinned, on no workspaces, or there is no match
     target.activate(int(time.time()))
+
 
 @commands.add('workspace-send-next', 1)
 @commands.add('workspace-send-prev', -1)
@@ -1106,31 +1123,48 @@ def workspace_send_window(wm, win, state, motion):  # pylint: disable=W0613
 
     win.move_to_workspace(target)
 
+
 #}
 
-if __name__ == '__main__':
+
+def run():
     from optparse import OptionParser, OptionGroup
+
     parser = OptionParser(usage="%prog [options] [action] ...",
-            version="%%prog v%s" % __version__)
-    parser.add_option('-d', '--daemonize', action="store_true",
-        dest="daemonize", default=False, help="Attempt to set up global "
-        "keybindings using python-xlib and a D-Bus service using dbus-python. "
-        "Exit if neither succeeds")
-    parser.add_option('-b', '--bindkeys', action="store_true",
-        dest="daemonize", default=False,
-        help="Deprecated alias for --daemonize")
-    parser.add_option('--debug', action="store_true", dest="debug",
-        default=False, help="Display debug messages")
-    parser.add_option('--no-workarea', action="store_true", dest="no_workarea",
-        default=False, help="Overlap panels but work better with "
-        "non-rectangular desktops")
+                          version="%%prog v%s" % __version__)
+    parser.add_option('-d', '--daemonize',
+                      action="store_true",
+                      dest="daemonize",
+                      default=False,
+                      help="Attempt to set up global keybindings using python-xlib and "
+                           "a D-Bus service using dbus-python. Exit if neither succeeds.")
+    parser.add_option('-b', '--bindkeys',
+                      action="store_true",
+                      dest="daemonize",
+                      default=False,
+                      help="Deprecated alias for --daemonize.")
+    parser.add_option('--debug',
+                      action="store_true",
+                      dest="debug",
+                      default=False,
+                      help="Display debug messages.")
+    parser.add_option('--no-workarea',
+                      action="store_true",
+                      dest="no_workarea",
+                      default=False,
+                      help="Overlap panels but work better with non-rectangular desktops.")
 
     help_group = OptionGroup(parser, "Additional Help")
-    help_group.add_option('--show-bindings', action="store_true",
-        dest="showBinds", default=False, help="List all configured keybinds")
-    help_group.add_option('--show-actions', action="store_true",
-        dest="showArgs", default=False, help="List valid arguments for use "
-        "without --daemonize")
+    help_group.add_option('--show-bindings',
+                          action="store_true",
+                          dest="showBinds",
+                          default=False,
+                          help="List all configured keybindings.")
+    help_group.add_option('--show-actions',
+                          action="store_true",
+                          dest="showArgs",
+                          default=False,
+                          help="List valid arguments for use without --daemonize.")
     parser.add_option_group(help_group)
 
     opts, args = parser.parse_args()
@@ -1145,8 +1179,7 @@ if __name__ == '__main__':
 
     config = RawConfigParser()
     config.optionxform = str  # Make keys case-sensitive
-    #TODO: Maybe switch to two config files so I can have only the keys in the
-    #      keymap case-sensitive?
+    #TODO: Maybe switch to two config files so I can have only the keys in the keymap case-sensitive?
     config.read(cfg_path)
     dirty = False
 
@@ -1179,17 +1212,7 @@ if __name__ == '__main__':
             config.set('keys', row[0], row[1])
         dirty = True
 
-    # Migrate from the deprecated syntax for punctuation keysyms
-    for key in keymap:
-        # Look up unrecognized shortkeys in a hardcoded dict and
-        # replace with valid names like ',' -> 'comma'
-        transKey = key
-        if key in KEYLOOKUP:
-            logging.warn("Updating config file from deprecated keybind syntax:"
-                    "\n\t%r --> %r", key, KEYLOOKUP[key])
-            transKey = KEYLOOKUP[key]
-            dirty = True
-
+    # Write back configuration changes to the config file.
     if dirty:
         cfg_file = file(cfg_path, 'wb')
         config.write(cfg_file)
@@ -1197,22 +1220,19 @@ if __name__ == '__main__':
         if first_run:
             logging.info("Wrote default config file to %s", cfg_path)
 
-    ignore_workarea = ((not config.getboolean('general', 'UseWorkarea'))
-                       or opts.no_workarea)
+    ignore_workarea = (not config.getboolean('general', 'UseWorkarea')) or opts.no_workarea
 
     wm = WindowManager(ignore_workarea=ignore_workarea)
     app = QuickTileApp(wm, commands, keymap, modmask=modkeys)
 
-    if opts.showBinds:
-        app.showBinds()
+    if opts.show_bindings:
+        app.show_bindings()
         sys.exit()
 
     if opts.daemonize:
         if not app.run():
-            logging.critical("Neither the Xlib nor the D-Bus backends were "
-                             "available")
-            sys.exit(errno.ENOENT)
-            #FIXME: What's the proper exit code for "library not found"?
+            logging.critical("Neither the Xlib nor the D-Bus backends were available.")
+            sys.exit(errno.ELIBACC)
 
     elif not first_run:
         if not args or opts.showArgs:
@@ -1228,3 +1248,7 @@ if __name__ == '__main__':
                 commands.call(arg, wm)
             while gtk.events_pending():
                 gtk.main_iteration()
+
+
+if __name__ == '__main__':
+    run()
