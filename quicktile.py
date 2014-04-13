@@ -32,7 +32,7 @@ __author__  = "Stephan Sokolow (deitarion/SSokolow)"
 __version__ = "0.2.2"
 __license__ = "GNU GPL 2.0 or later"
 
-import errno, logging, os, sys, time
+import errno, logging, os, re, sys, time
 from ConfigParser import RawConfigParser
 from heapq import heappop, heappush
 from itertools import chain, combinations
@@ -175,8 +175,56 @@ KEYLOOKUP = {
     '-': 'minus',
 }  #: Used for resolving certain keysyms
 
+#: Regular expression for custom command specification
+TABLE_CMD_RE = re.compile(r"""^ \s*                 # Possible initial whitespace
+                              table \s+             # Table marker followed by whitespace
+                              (\d+)x(\d+) \s+       # Table dimensions as (rows)x(cols)
+                              \(                    # Opening paren
+                                 (\d+)(?::(\d+))?   # Row position or range
+                                 \s* , \s*          # Separating comma and optional whitespace
+                                 (\d+)(?::(\d+))?   # Column position or range
+                              \) \s* $              # Ending paren and possible trailing whitespace
+                              """, re.IGNORECASE | re.VERBOSE)
+
+def add_custom_command(name, specification):
+    """Parse and add a custom command (position list) to the command collection."""
+
+    dimensions = []
+
+    def parse_table(line):
+        match = TABLE_CMD_RE.match(line)
+        if match is None:
+            return False
+        int_groups = map(lambda x: None if x is None else int(x), match.groups())
+        rows, cols, row_start, row_end, col_start, col_end = int_groups
+        top = float(row_start - 1) / rows
+        bottom = float(row_end or row_start) / rows
+        left = float(col_start - 1) / cols
+        right = float(col_end or col_start) / cols
+        dimensions.append((left, top, right - left, bottom - top))
+        return True
+
+    for line in specification.split('\n'):
+        if len(line) == 0:
+            continue
+        elif parse_table(line):
+            continue
+        else:
+            logging.error('Could not understand line when parsing custom command %s: %s', name, line)
+
+    POSITIONS[name] = dimensions
+
 #}
 #{ Helpers
+
+def print_positions():
+    """Print the contents of POSITIONS in a nice way."""
+    print 'Positions:'
+    print '----------'
+    for position_name, rect_list in POSITIONS.items():
+        print('%s:' % position_name)
+        for x, y, w, h in rect_list:
+            print '   x: %4.2f - %4.2f   y: %4.2f - %4.2f' % (x, x + w, y, y + h)
 
 def powerset(iterable):
     """C{powerset([1,2,3])} --> C{() (1,) (2,) (3,) (1,2) (1,3) (2,3) (1,2,3)}
@@ -921,7 +969,6 @@ class QuickTileApp(object):
 commands = CommandRegistry()
 #{ Tiling Commands
 
-@commands.addMany(POSITIONS)
 def cycle_dimensions(wm, win, state, *dimensions):
     """Cycle the active window through a list of positions and shapes.
 
@@ -1131,6 +1178,8 @@ if __name__ == '__main__':
     help_group.add_option('--show-actions', action="store_true",
         dest="showArgs", default=False, help="List valid arguments for use "
         "without --daemonize")
+    help_group.add_option('--show-positions', action="store_true",
+                          dest="showPositions", default=False, help="Show the lists of window positions used.")
     parser.add_option_group(help_group)
 
     opts, args = parser.parse_args()
@@ -1169,6 +1218,12 @@ if __name__ == '__main__':
         config.set('general', 'ModMask', modkeys)
         dirty = True
 
+    # Parse custom position lists if present in config file
+    if config.has_section('commands'):
+        for name, specification in config.items('commands'):
+            add_custom_command(name, specification)
+    commands.addMany(POSITIONS)(cycle_dimensions)
+
     # Either load the keybindings or use and save the defaults
     if config.has_section('keys'):
         keymap = dict(config.items('keys'))
@@ -1203,8 +1258,13 @@ if __name__ == '__main__':
     wm = WindowManager(ignore_workarea=ignore_workarea)
     app = QuickTileApp(wm, commands, keymap, modmask=modkeys)
 
+    if opts.showPositions:
+        print_positions()
+
     if opts.showBinds:
         app.showBinds()
+
+    if opts.showPositions or opts.showBinds:
         sys.exit()
 
     if opts.daemonize:
