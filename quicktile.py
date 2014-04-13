@@ -72,6 +72,9 @@ try:
     from Xlib.error import BadAccess
     XLIB_PRESENT = True  #: Indicates presence of python-xlib (runtime check)
 except ImportError:
+    X = None
+    Display = None
+    BadAccess = None
     XLIB_PRESENT = False  #: Indicates presence of python-xlib (runtime check)
 
 
@@ -82,7 +85,10 @@ try:
     from dbus.exceptions import DBusException
     from dbus.mainloop.glib import DBusGMainLoop
 except ImportError:
-    pass
+    dbus = None
+    SessionBus = None
+    DBusException = None
+    DBusGMainLoop = None
 else:
     try:
         DBusGMainLoop(set_as_default=True)
@@ -138,22 +144,23 @@ class GravityLayout(object):
                 y - offset_y,
                 w, h)
 
-col, gv = 1.0 / 3, GravityLayout()
 
-#TODO: Figure out how best to put this in the config file.
-POSITIONS = {
-    'middle': [gv(x, 1, 'middle') for x in (1.0, col, col * 2)],
-}  #: command-to-position mappings for L{cycle_dimensions}
+def generate_positions():
+    col = 1.0 / 3
+    gv = GravityLayout()
 
-for grav in ('top', 'bottom'):
-    POSITIONS[grav] = [gv(x, 0.5, grav) for x in (1.0, col, col * 2)]
-for grav in ('left', 'right'):
-    POSITIONS[grav] = [gv(x, 1, grav) for x in (0.5, col, col * 2)]
-for grav in ('top-left', 'top-right', 'bottom-left', 'bottom-right'):
-    POSITIONS[grav] = [gv(x, 0.5, grav) for x in (0.5, col, col * 2)]
+    #TODO: Figure out how best to put this in the config file.
+    positions = {
+        'middle': [gv(x, 1, 'middle') for x in (1.0, col, col * 2)],
+    }  #: command-to-position mappings for L{cycle_dimensions}
 
-# Keep these temporary variables out of the API docs
-del col, grav, gv, x
+    for grav in ('top', 'bottom'):
+        positions[grav] = [gv(x, 0.5, grav) for x in (1.0, col, col * 2)]
+    for grav in ('left', 'right'):
+        positions[grav] = [gv(x, 1, grav) for x in (0.5, col, col * 2)]
+    for grav in ('top-left', 'top-right', 'bottom-left', 'bottom-right'):
+        positions[grav] = [gv(x, 0.5, grav) for x in (0.5, col, col * 2)]
+
 
 DEFAULTS = {
     'general': {
@@ -226,7 +233,7 @@ def fmt_table(rows, headers, group_by=None):
     # Identify how much space needs to be allocated for each column
     col_maxlens = []
     for pos, header in enumerate(headers):
-        maxlen = max(len(x[pos]) for x in rows if len(x) > pos)
+        maxlen = max(len(row[pos]) for row in rows if len(row) > pos)
         col_maxlens.append(max(maxlen, len(header)))
 
     def fmt_row(row, pad=' ', indent=0, min_width=0):
@@ -295,8 +302,7 @@ class EnumSafeDict(DictMixin):
                 yield key
 
     def __repr__(self):
-        return "%s(%s)" % (self.__class__.__name__,
-            ', '.join(repr(x) for x in self._contents.values()))
+        return "%s(%s)" % (self.__class__.__name__, ', '.join(repr(x) for x in self._contents.values()))
 
     def __setitem__(self, key, value):
         ktype = type(key)
@@ -411,6 +417,7 @@ class CommandRegistry(object):
         cmd = self.commands.get(command, None)
 
         if cmd:
+            assert isinstance(cmd, callable)
             cmd(wm, *args, **kwargs)
         else:
             logging.error("Unrecognized command: %s", command)
@@ -432,7 +439,7 @@ class WindowManager(object):
         'SOUTH': (0.5, 1.0),
         'SOUTH_EAST': (1.0, 1.0),
     })
-    key, val = None, None  # Safety cushion for the "del" line.
+    _name, key, val = None, None, None  # Safety cushion for the "del" line.
     for key, val in gravities.items():
         del gravities[key]
 
@@ -502,22 +509,20 @@ class WindowManager(object):
 
         return win_geom
 
-    @staticmethod
-    def get_monitor(win):
+    def get_monitor(self, win):
         """Given a Window (Wnck or GDK), retrieve the monitor ID and geometry.
 
         @type win: C{wnck.Window} or C{gtk.gdk.Window}
         @returns: A tuple containing the monitor ID and geometry.
         @rtype: C{(int, gtk.gdk.Rectangle)}
         """
-        #TODO: Look for a way to get the monitor ID without having
-        #      to instantiate a gtk.gdk.Window
+        #TODO: Look for a way to get the monitor ID without having to instantiate a gtk.gdk.Window
         if not isinstance(win, gtk.gdk.Window):
             win = gtk.gdk.window_foreign_new(win.get_xid())
 
         #TODO: How do I retrieve the root window from a given one?
-        monitor_id = wm.gdk_screen.get_monitor_at_window(win)
-        monitor_geom = wm.gdk_screen.get_monitor_geometry(monitor_id)
+        monitor_id = self.gdk_screen.get_monitor_at_window(win)
+        monitor_geom = self.gdk_screen.get_monitor_geometry(monitor_id)
 
         logging.debug("Monitor: %s, %s", monitor_id, monitor_geom)
         return monitor_id, monitor_geom
@@ -619,8 +624,7 @@ class WindowManager(object):
         if isinstance(direction, wnck.MotionDirection):
             nxt = cur.get_neighbor(direction)
         elif isinstance(direction, int):
-            nxt = wm.screen.get_workspace((cur.get_number() + direction) %
-                    wm.screen.get_workspace_count())
+            nxt = self.screen.get_workspace((cur.get_number() + direction) % self.screen.get_workspace_count())
         elif direction is None:
             nxt = cur
         else:
@@ -629,8 +633,7 @@ class WindowManager(object):
 
         return nxt
 
-    @classmethod
-    def reposition(cls, win, geom=None, monitor=gtk.gdk.Rectangle(0, 0, 0, 0),
+    def reposition(self, win, geom=None, monitor=gtk.gdk.Rectangle(0, 0, 0, 0),
                    keep_maximize=False, gravity=wnck.WINDOW_GRAVITY_NORTHWEST,
                    geometry_mask=wnck.WINDOW_CHANGE_X | wnck.WINDOW_CHANGE_Y |
                    wnck.WINDOW_CHANGE_WIDTH | wnck.WINDOW_CHANGE_HEIGHT):
@@ -659,8 +662,11 @@ class WindowManager(object):
         @type geom: C{gtk.gdk.Rectangle}
         @type monitor: C{gtk.gdk.Rectangle}
         @type keep_maximize: C{bool}
-        @type gravity: U{WnckWindowGravity<https://developer.gnome.org/libwnck/stable/WnckWindow.html#WnckWindowGravity>} or U{GDK Gravity Constant<http://www.pygtk.org/docs/pygtk/gdk-constants.html#gdk-gravity-constants>}
-        @type geometry_mask: U{WnckWindowMoveResizeMask<https://developer.gnome.org/libwnck/2.30/WnckWindow.html#WnckWindowMoveResizeMask>}
+        @type gravity:
+            U{WnckWindowGravity<https://developer.gnome.org/libwnck/stable/WnckWindow.html#WnckWindowGravity>} or
+            U{GDK Gravity Constant<http://www.pygtk.org/docs/pygtk/gdk-constants.html#gdk-gravity-constants>}
+        @type geometry_mask: U{WnckWindowMoveResizeMask
+                <https://developer.gnome.org/libwnck/2.30/WnckWindow.html#WnckWindowMoveResizeMask>}
 
         @todo 1.0.0: Look for a way to accomplish this with a cleaner method
             signature. This is getting a little hairy. (API-breaking change)
@@ -668,7 +674,7 @@ class WindowManager(object):
 
         # We need to ensure that ignored values are still present for
         # gravity calculations.
-        old_geom = wm.get_geometry_rel(win, wm.get_monitor(win)[1])
+        old_geom = self.get_geometry_rel(win, self.get_monitor(win)[1])
         if geom:
             for attr in ('x', 'y', 'width', 'height'):
                 if not geometry_mask & getattr(wnck, 'WINDOW_CHANGE_%s' % attr.upper()):
@@ -684,7 +690,7 @@ class WindowManager(object):
                 getattr(win, 'unmaximize' + mt)()
 
         # Apply gravity and resolve to absolute desktop coordinates.
-        new_x, new_y = cls.calc_win_gravity(geom, gravity)
+        new_x, new_y = WindowManager.calc_win_gravity(geom, gravity)
         new_x += monitor.x
         new_y += monitor.y
 
@@ -776,8 +782,7 @@ class KeyBinder(object):
         # Ignore modifiers like Mod2 (NumLock) and Lock (CapsLock)
         for mmask in self._vary_modmask(modmask, self.ignored_modifiers):
             self._keys.setdefault(keycode, []).append((mmask, callback))
-            self.xroot.grab_key(keycode, mmask,
-                    1, X.GrabModeAsync, X.GrabModeAsync)
+            self.xroot.grab_key(keycode, mmask, 1, X.GrabModeAsync, X.GrabModeAsync)
 
         # If we don't do this, then nothing works.
         # I assume it flushes the XGrabKey calls to the server.
@@ -885,25 +890,26 @@ class QuickTileApp(object):
         if XLIB_PRESENT:
             self.keybinder = KeyBinder()
             for key, func in self._keys.items():
-                def call(func=func):
-                    self.commands.call(func, wm)
+                def call(to_call=func):
+                    self.commands.call(to_call, self.wm)
 
                 self.keybinder.bind(self._modmask + key, call)
         else:
             logging.error("Could not find python-xlib. Cannot bind keys.")
 
         if DBUS_PRESENT:
-            class QuickTile(dbus.service.Object):
-                def __init__(self, commands):
+            class QuickTileService(dbus.service.Object):
+                def __init__(self, commands, wm):
                     dbus.service.Object.__init__(self, sessBus, '/com/ssokolow/QuickTile')
                     self.commands = commands
+                    self.wm = wm
 
                 @dbus.service.method(dbus_interface='com.ssokolow.QuickTile', in_signature='s', out_signature='b')
                 def do_command(self, command):
-                    return self.commands.call(command, wm)
+                    return self.commands.call(command, self.wm)
 
             self.dbus_name = dbus.service.BusName("com.ssokolow.QuickTile", sessBus)
-            self.dbus_obj = QuickTile(self.commands)
+            self.dbus_obj = QuickTileService(self.commands, self.wm)
         else:
             logging.warn("Could not connect to the D-Bus Session Bus.")
 
@@ -926,13 +932,13 @@ class QuickTileApp(object):
 
 
 #: The instance of L{CommandRegistry} to be used in 99.9% of use cases.
-commands = CommandRegistry()
+command_registry = CommandRegistry()
 
 
 #{ Tiling Commands
 
 
-@commands.add_many(POSITIONS)
+@command_registry.add_many(generate_positions())
 def cycle_dimensions(wm, win, state, *dimensions):
     """Cycle the active window through a list of positions and shapes.
 
@@ -1006,9 +1012,9 @@ def cycle_dimensions(wm, win, state, *dimensions):
     return result
 
 
-@commands.add('monitor-switch')
-@commands.add('monitor-next', 1)
-@commands.add('monitor-prev', -1)
+@command_registry.add('monitor-switch')
+@command_registry.add('monitor-next', 1)
+@command_registry.add('monitor-prev', -1)
 def cycle_monitors(wm, win, state, step=1):
     """Cycle the active window between monitors while preserving position.
 
@@ -1024,7 +1030,7 @@ def cycle_monitors(wm, win, state, step=1):
     wm.reposition(win, None, new_mon_geom, keep_maximize=True)
 
 
-@commands.add('move-to-center')
+@command_registry.add('move-to-center')
 def cmd_move_to_center(wm, win, state):
     """Center the window in the monitor it currently occupies."""
     use_rect = state['usable_rect']
@@ -1039,29 +1045,29 @@ def cmd_move_to_center(wm, win, state):
                   geometry_mask=wnck.WINDOW_CHANGE_X | wnck.WINDOW_CHANGE_Y)
 
 
-@commands.add('bordered')
+@command_registry.add('bordered')
 def toggle_decorated(wm, win, state):  # pylint: disable=W0613
     """Toggle window state on the active window."""
     win = gtk.gdk.window_foreign_new(win.get_xid())
     win.set_decorations(not win.get_decorations())
 
 
-@commands.add('show-desktop')
+@command_registry.add('show-desktop')
 def toggle_desktop(wm, win, state):  # pylint: disable=W0613
     """Toggle "all windows minimized" to view the desktop"""
     target = not wm.screen.get_showing_desktop()
     wm.screen.toggle_showing_desktop(target)
 
 
-@commands.add('all-desktops', 'pin', 'is_pinned')
-@commands.add('fullscreen', 'set_fullscreen', 'is_fullscreen', True)
-@commands.add('vertical-maximize', 'maximize_vertically', 'is_maximized_vertically')
-@commands.add('horizontal-maximize', 'maximize_horizontally', 'is_maximized_horizontally')
-@commands.add('maximize', 'maximize', 'is_maximized')
-@commands.add('minimize', 'minimize', 'is_minimized')
-@commands.add('always-above', 'make_above', 'is_above')
-@commands.add('always-below', 'make_below', 'is_below')
-@commands.add('shade', 'shade', 'is_shaded')
+@command_registry.add('all-desktops', 'pin', 'is_pinned')
+@command_registry.add('fullscreen', 'set_fullscreen', 'is_fullscreen', True)
+@command_registry.add('vertical-maximize', 'maximize_vertically', 'is_maximized_vertically')
+@command_registry.add('horizontal-maximize', 'maximize_horizontally', 'is_maximized_horizontally')
+@command_registry.add('maximize', 'maximize', 'is_maximized')
+@command_registry.add('minimize', 'minimize', 'is_minimized')
+@command_registry.add('always-above', 'make_above', 'is_above')
+@command_registry.add('always-below', 'make_below', 'is_below')
+@command_registry.add('shade', 'shade', 'is_shaded')
 # pylint: disable=W0613
 def toggle_state(wm, win, state, command, check, takes_bool=False):
     """Toggle window state on the active window.
@@ -1088,19 +1094,19 @@ def toggle_state(wm, win, state, command, check, takes_bool=False):
         getattr(win, ('' if target else 'un') + command)()
 
 
-@commands.add('trigger-move', 'move')
-@commands.add('trigger-resize', 'size')
+@command_registry.add('trigger-move', 'move')
+@command_registry.add('trigger-resize', 'size')
 def trigger_keyboard_action(wm, win, state, command):  # pylint: disable=W0613
     """Ask the Window Manager to begin a keyboard-driven operation."""
     getattr(win, 'keyboard_' + command)()
 
 
-@commands.add('workspace-go-next', 1)
-@commands.add('workspace-go-prev', -1)
-@commands.add('workspace-go-up', wnck.MOTION_UP)
-@commands.add('workspace-go-down', wnck.MOTION_DOWN)
-@commands.add('workspace-go-left', wnck.MOTION_LEFT)
-@commands.add('workspace-go-right', wnck.MOTION_RIGHT)
+@command_registry.add('workspace-go-next', 1)
+@command_registry.add('workspace-go-prev', -1)
+@command_registry.add('workspace-go-up', wnck.MOTION_UP)
+@command_registry.add('workspace-go-down', wnck.MOTION_DOWN)
+@command_registry.add('workspace-go-left', wnck.MOTION_LEFT)
+@command_registry.add('workspace-go-right', wnck.MOTION_RIGHT)
 def workspace_go(wm, win, state, motion):  # pylint: disable=W0613
     """Switch the active workspace (next/prev wrap around)"""
     target = wm.get_workspace(None, motion)
@@ -1109,12 +1115,12 @@ def workspace_go(wm, win, state, motion):  # pylint: disable=W0613
     target.activate(int(time.time()))
 
 
-@commands.add('workspace-send-next', 1)
-@commands.add('workspace-send-prev', -1)
-@commands.add('workspace-send-up', wnck.MOTION_UP)
-@commands.add('workspace-send-down', wnck.MOTION_DOWN)
-@commands.add('workspace-send-left', wnck.MOTION_LEFT)
-@commands.add('workspace-send-right', wnck.MOTION_RIGHT)
+@command_registry.add('workspace-send-next', 1)
+@command_registry.add('workspace-send-prev', -1)
+@command_registry.add('workspace-send-up', wnck.MOTION_UP)
+@command_registry.add('workspace-send-down', wnck.MOTION_DOWN)
+@command_registry.add('workspace-send-left', wnck.MOTION_LEFT)
+@command_registry.add('workspace-send-right', wnck.MOTION_RIGHT)
 def workspace_send_window(wm, win, state, motion):  # pylint: disable=W0613
     """Move the active window to another workspace (next/prev wrap around)"""
     target = wm.get_workspace(win, motion)
@@ -1223,7 +1229,7 @@ def run():
     ignore_workarea = (not config.getboolean('general', 'UseWorkarea')) or opts.no_workarea
 
     wm = WindowManager(ignore_workarea=ignore_workarea)
-    app = QuickTileApp(wm, commands, keymap, modmask=modkeys)
+    app = QuickTileApp(wm, command_registry, keymap, modmask=modkeys)
 
     if opts.show_bindings:
         app.show_bindings()
@@ -1236,7 +1242,7 @@ def run():
 
     elif not first_run:
         if not args or opts.showArgs:
-            print commands
+            print command_registry
 
             if not opts.showArgs:
                 print "\nUse --help for a list of valid options."
@@ -1245,7 +1251,7 @@ def run():
             wm.screen.force_update()
 
             for arg in args:
-                commands.call(arg, wm)
+                command_registry.call(arg, wm)
             while gtk.events_pending():
                 gtk.main_iteration()
 
