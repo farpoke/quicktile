@@ -162,6 +162,8 @@ def generate_positions():
     for grav in ('top-left', 'top-right', 'bottom-left', 'bottom-right'):
         positions[grav] = [gv(x, 0.5, grav) for x in (0.5, col, col * 2)]
 
+    return positions
+
 
 DEFAULTS = {
     'general': {
@@ -199,8 +201,9 @@ TABLE_CMD_RE = re.compile(r"""^ \s*                 # Possible initial whitespac
                               \) \s* $              # Ending paren and possible trailing whitespace
                               """, re.IGNORECASE | re.VERBOSE)
 
-def add_custom_command(name, specification):
-    """Parse and add a custom command (position list) to the command collection."""
+
+def parse_custom_command(specification):
+    """Parse a custom command (position list) to add to the command collection."""
 
     dimensions = []
 
@@ -217,25 +220,25 @@ def add_custom_command(name, specification):
         dimensions.append((left, top, right - left, bottom - top))
         return True
 
-    for line in specification.split('\n'):
-        if len(line) == 0:
+    for spec_line in specification.split('\n'):
+        if len(spec_line) == 0:
             continue
-        elif parse_table(line):
+        elif parse_table(spec_line):
             continue
         else:
-            logging.error('Could not understand line when parsing custom command %s: %s', name, line)
+            logging.error('Could not understand line when parsing custom command: %s', spec_line)
 
-    POSITIONS[name] = dimensions
+    return dimensions
 
 #}
 #{ Helpers
 
 
-def print_positions():
+def print_positions(positions):
     """Print the contents of POSITIONS in a nice way."""
     print 'Positions:'
     print '----------'
-    for position_name, rect_list in POSITIONS.items():
+    for position_name, rect_list in positions.items():
         print('%s:' % position_name)
         for x, y, w, h in rect_list:
             print '   x: %4.2f - %4.2f   y: %4.2f - %4.2f' % (x, x + w, y, y + h)
@@ -1262,11 +1265,14 @@ def run():
         config.set('general', 'ModMask', modkeys)
         dirty = True
 
+    # Generate default position lists
+    positions = generate_positions()
+
     # Parse custom position lists if present in config file
     if config.has_section('commands'):
         for name, specification in config.items('commands'):
-            add_custom_command(name, specification)
-    commands.addMany(POSITIONS)(cycle_dimensions)
+            positions[name] = parse_custom_command(specification)
+    command_registry.add_many(positions)(cycle_dimensions)
 
     # Either load the keybindings or use and save the defaults
     if config.has_section('keys'):
@@ -1292,7 +1298,7 @@ def run():
     app = QuickTileApp(wm, command_registry, keymap, modmask=modkeys)
 
     if opts.showPositions:
-        print_positions()
+        print_positions(positions)
 
     if opts.showBinds:
         app.show_bindings()
