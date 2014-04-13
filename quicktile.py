@@ -1052,6 +1052,11 @@ def cycle_dimensions(wm, win, state, *dimensions):
     result.x += clip_box.x
     result.y += clip_box.y
 
+    # If the requested dimension fills the screen, maximize the window instead.
+    if result == clip_box:
+        toggle_state(wm, win, state, 'maximize', 'is_maximized')
+        return result
+
     # If we're overlapping a panel, fall back to a monitor-specific
     # analogue to _NET_WORKAREA to prevent overlapping any panels and
     # risking the WM potentially meddling with the result of resposition()
