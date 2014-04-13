@@ -470,7 +470,7 @@ class CommandRegistry(object):
         cmd = self.commands.get(command, None)
 
         if cmd:
-            assert isinstance(cmd, callable)
+            assert callable(cmd)
             cmd(wm, *args, **kwargs)
         else:
             logging.error("Unrecognized command: %s", command)
